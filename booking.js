@@ -15,45 +15,10 @@ import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { BASE_URL } from "../config";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width, height } = Dimensions.get("window");
-
-// Sample station data
-const stations = [
-  {
-    id: "1",
-    name: "ElectroHub Downtown",
-    address: "123 Main St, City Center",
-    latitude: 27.7045,
-    longitude: 85.3147,
-    type: "Fast Charger (50kW)",
-    available: true,
-    price: "$0.35/kWh",
-    amenities: ["Cafe", "Restrooms", "WiFi"],
-  },
-  {
-    id: "2",
-    name: "GreenPower Station",
-    address: "456 Park Ave, North District",
-    latitude: 27.7145,
-    longitude: 85.3247,
-    type: "Ultra-Fast (150kW)",
-    available: true,
-    price: "$0.45/kWh",
-    amenities: ["Convenience Store", "Lounge"],
-  },
-  {
-    id: "3",
-    name: "EcoCharge Mall",
-    address: "789 Shopping Blvd, Eastside",
-    latitude: 27.6945,
-    longitude: 85.3047,
-    type: "Standard (22kW)",
-    available: true,
-    price: "$0.25/kWh",
-    amenities: ["Shopping", "Food Court"],
-  },
-];
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -65,43 +30,194 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStation, setSelectedStation] = useState(null);
   const [nearestStations, setNearestStations] = useState([]);
+  const [verifiedStations, setVerifiedStations] = useState([]);
   const [showNearestStationsModal, setShowNearestStationsModal] =
     useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [isCurrentLocation, setIsCurrentLocation] = useState(true);
+  const [watchId, setWatchId] = useState(null);
+  const [locationTracking, setLocationTracking] = useState(true);
 
-  // Get user location
-  useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        alert("Permission to access location was denied");
-        setLoading(false);
-        return;
+  // Function to handle new location updates
+  const handleNewLocation = async (coords) => {
+    try {
+      setLocation(coords);
+      setIsCurrentLocation(true);
+      setLoading(true);
+
+      // Reverse geocode to get address
+      const address = await Location.reverseGeocodeAsync(coords);
+      if (address[0]) {
+        const street = address[0].street || address[0].name;
+        const city = address[0].city || address[0].region;
+        setLocationName(`${street ? street + ", " : ""}${city || ""}`);
       }
 
-      try {
-        const location = await Location.getCurrentPositionAsync({});
-        setLocation(location.coords);
-        setIsCurrentLocation(true);
+      updateMapRegion(coords);
+    } catch (error) {
+      console.error("Error handling new location:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        const address = await Location.reverseGeocodeAsync(location.coords);
-        if (address[0]) {
-          setLocationName(`${address[0].street}, ${address[0].city}`);
+  // Function to return to current location
+  const handleReturnToCurrentLocation = async () => {
+    setLocationTracking(true);
+    setIsCurrentLocation(true);
+    setCustomLocationInput("");
+
+    try {
+      // First try last known position for faster response
+      const lastPosition = await Location.getLastKnownPositionAsync();
+      if (lastPosition) {
+        handleNewLocation(lastPosition.coords);
+      }
+
+      // Then get fresh position
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        timeout: 5000,
+      });
+
+      handleNewLocation(currentLocation.coords);
+
+      // Restart location watcher if not already running
+      if (!watchId && locationTracking) {
+        const newWatcher = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 100,
+            timeInterval: 5000,
+          },
+          (newLocation) => {
+            if (locationTracking) {
+              handleNewLocation(newLocation.coords);
+            }
+          }
+        );
+        setWatchId(newWatcher);
+      }
+    } catch (error) {
+      console.error("Error returning to current location:", error);
+      alert("Couldn't get current location. Please try again.");
+    }
+  };
+
+  // Fetch verified stations from backend
+  useEffect(() => {
+    const fetchVerifiedStations = async () => {
+      try {
+        const response = await fetch(`${BASE_URL}/admin/stations`);
+        const data = await response.json();
+        if (!data.success)
+          throw new Error(data.detail || "Failed to fetch stations");
+
+        const mappedStations = data.stations
+          .map((station) => ({
+            id: station._id,
+            name: station.stationName,
+            address: station.stationAddress,
+            latitude: parseFloat(station.latitude),
+            longitude: parseFloat(station.longitude),
+            type: station.stationType,
+            available: station.status === "Online",
+            price: station.pricePerMinute,
+            amenities: station.amenities || [],
+          }))
+          .filter(
+            (station) =>
+              !isNaN(station.latitude) &&
+              !isNaN(station.longitude) &&
+              station.latitude !== null &&
+              station.longitude !== null
+          );
+
+        setVerifiedStations(mappedStations);
+      } catch (error) {
+        console.error("Error fetching stations:", error);
+        alert("Failed to load stations. Please try again.");
+      }
+    };
+
+    fetchVerifiedStations();
+  }, []);
+
+  // Location tracking effect
+  useEffect(() => {
+    let isMounted = true;
+    let locationWatcher = null;
+
+    const getLocation = async () => {
+      try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          if (isMounted) {
+            alert("Permission to access location was denied");
+            setLoading(false);
+          }
+          return;
         }
 
-        updateMapRegion(location.coords);
+        // First try last known position
+        const lastPosition = await Location.getLastKnownPositionAsync();
+        if (lastPosition && isMounted) {
+          handleNewLocation(lastPosition.coords);
+        }
+
+        // Then get fresh position
+        const initialLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          timeout: 5000,
+        });
+
+        if (isMounted) {
+          handleNewLocation(initialLocation.coords);
+        }
+
+        if (locationTracking) {
+          locationWatcher = await Location.watchPositionAsync(
+            {
+              accuracy: Location.Accuracy.Balanced,
+              distanceInterval: 100,
+              timeInterval: 5000,
+            },
+            (newLocation) => {
+              if (isMounted && locationTracking) {
+                handleNewLocation(newLocation.coords);
+              }
+            }
+          );
+
+          if (isMounted) {
+            setWatchId(locationWatcher);
+          }
+        }
       } catch (error) {
         console.error("Location error:", error);
-      } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-    })();
-  }, []);
+    };
+
+    if (locationTracking) {
+      getLocation();
+    }
+
+    return () => {
+      isMounted = false;
+      if (locationWatcher) {
+        locationWatcher.remove();
+      }
+    };
+  }, [locationTracking]);
 
   // Update map region
   const updateMapRegion = (coords) => {
+    if (!coords) return;
+
     mapRef.current?.animateToRegion(
       {
         latitude: coords.latitude,
@@ -113,32 +229,19 @@ export default function HomeScreen() {
     );
   };
 
+  // Handle custom location search
   const handleCustomLocation = async () => {
-    // If input is completely empty
-    if (!customLocationInput) {
-      try {
-        // Reset to current location
-        const location = await Location.getCurrentPositionAsync({});
-        const address = await Location.reverseGeocodeAsync(location.coords);
-
-        setLocation(location.coords);
-        setLocationName(
-          address[0]
-            ? `${address[0].street}, ${address[0].city}`
-            : "Current Location"
-        );
-        updateMapRegion(location.coords);
-        setIsCurrentLocation(true);
-        setCustomLocationInput("");
-        return;
-      } catch (error) {
-        console.error("Reset location error:", error);
-        alert("Error resetting location");
-        return;
-      }
+    if (!customLocationInput.trim()) {
+      handleReturnToCurrentLocation();
+      return;
     }
 
-    // If there's a custom location input
+    setLocationTracking(false);
+    if (watchId) {
+      watchId.remove();
+      setWatchId(null);
+    }
+
     try {
       const results = await Location.geocodeAsync(customLocationInput);
       if (results.length > 0) {
@@ -150,15 +253,15 @@ export default function HomeScreen() {
         setLocationName(customLocationInput);
         updateMapRegion(newCoords);
         setIsCurrentLocation(false);
-        setCustomLocationInput("");
       } else {
-        alert("Location not found");
+        alert("Location not found. Please try a different address.");
       }
     } catch (error) {
       console.error("Geocoding error:", error);
-      alert("Error finding location");
+      alert("Error finding location. Please check your input and try again.");
     }
   };
+
   // Calculate distance between coordinates
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371; // Earth radius in km
@@ -176,9 +279,12 @@ export default function HomeScreen() {
 
   // Find nearest stations
   const findNearestStations = () => {
-    if (!location) return;
+    if (!location || verifiedStations.length === 0) {
+      alert("No location or stations available yet.");
+      return;
+    }
 
-    const stationsWithDistance = stations.map((station) => ({
+    const stationsWithDistance = verifiedStations.map((station) => ({
       ...station,
       distance: calculateDistance(
         location.latitude,
@@ -210,12 +316,12 @@ export default function HomeScreen() {
 
   // Filter stations based on search query
   const filteredStations = searchQuery
-    ? stations.filter(
+    ? verifiedStations.filter(
         (s) =>
           s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           s.address.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : stations;
+    : verifiedStations;
 
   // Render search dropdown item
   const renderSearchItem = ({ item }) => (
@@ -236,7 +342,7 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  // Render function for nearest stations list
+  // Render nearest station item
   const renderNearestStationItem = ({ item }) => (
     <TouchableOpacity
       style={styles.nearestItemVertical}
@@ -276,16 +382,40 @@ export default function HomeScreen() {
         onPress={() => setIsMenuOpen(false)}
       >
         <View style={styles.menuContainer}>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              router.push("/User_tab/myBooking");
-              setIsMenuOpen(false);
-            }}
-          >
-            <Ionicons name="book" size={24} color="#4CAF50" />
-            <Text style={styles.menuItemText}>My Bookings</Text>
-          </TouchableOpacity>
+          <View style={styles.menuItemsContainer}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                router.push("/User_tab/myBooking");
+                setIsMenuOpen(false);
+              }}
+            >
+              <Ionicons name="book" size={24} color="#4CAF50" />
+              <Text style={styles.menuItemText}>My Bookings</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.logoutContainer}>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={async () => {
+                try {
+                  await AsyncStorage.removeItem("userToken");
+                  await AsyncStorage.removeItem("userData");
+                  router.replace("../User_AuthScreen/login");
+                  setIsMenuOpen(false);
+                } catch (error) {
+                  console.error("Logout error:", error);
+                  alert("Error during logout. Please try again.");
+                }
+              }}
+            >
+              <Ionicons name="log-out" size={24} color="#F44336" />
+              <Text style={[styles.menuItemText, { color: "#F44336" }]}>
+                Logout
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     </Modal>
@@ -304,6 +434,14 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Loading Overlay */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.loadingText}>Getting your location...</Text>
+        </View>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -317,23 +455,21 @@ export default function HomeScreen() {
           <Ionicons name="location-sharp" size={18} color="#4CAF50" />
           <TextInput
             style={styles.locationInput}
-            value={customLocationInput || locationName}
+            value={isCurrentLocation ? locationName : customLocationInput}
             onChangeText={(text) => {
               setCustomLocationInput(text);
-              // If user starts typing, mark as not current location
-              if (text !== locationName) {
-                setIsCurrentLocation(false);
-              }
+              setIsCurrentLocation(false);
             }}
             onSubmitEditing={handleCustomLocation}
             placeholder="Enter location..."
             placeholderTextColor="#999"
+            clearButtonMode="while-editing"
           />
-          {customLocationInput || !isCurrentLocation ? (
+          {(customLocationInput || !isCurrentLocation) && (
             <TouchableOpacity onPress={handleCustomLocation}>
               <Ionicons name="search" size={18} color="#4CAF50" />
             </TouchableOpacity>
-          ) : null}
+          )}
         </View>
       </View>
 
@@ -356,7 +492,7 @@ export default function HomeScreen() {
           }}
           onFocus={() => setShowSearchDropdown(searchQuery.length > 0)}
         />
-        {searchQuery ? (
+        {searchQuery && (
           <TouchableOpacity
             onPress={() => {
               setSearchQuery("");
@@ -365,7 +501,7 @@ export default function HomeScreen() {
           >
             <Ionicons name="close-circle" size={20} color="#999" />
           </TouchableOpacity>
-        ) : null}
+        )}
       </View>
 
       {/* Search Dropdown */}
@@ -426,6 +562,14 @@ export default function HomeScreen() {
           </Marker>
         ))}
       </MapView>
+
+      {/* My Location Button */}
+      <TouchableOpacity
+        style={styles.myLocationButton}
+        onPress={handleReturnToCurrentLocation}
+      >
+        <Ionicons name="locate" size={24} color="#4CAF50" />
+      </TouchableOpacity>
 
       {/* Selected Station Card */}
       {selectedStation && (
@@ -527,6 +671,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFF",
   },
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.7)",
+    zIndex: 100,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
@@ -625,6 +780,23 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+  },
+  myLocationButton: {
+    position: "absolute",
+    bottom: 80,
+    right: 20,
+    backgroundColor: "#FFF",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+    zIndex: 5,
   },
   stationCard: {
     position: "absolute",
@@ -726,6 +898,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 5,
     elevation: 5,
+    flexDirection: "column",
+    justifyContent: "space-between",
+  },
+  menuItemsContainer: {
+    flex: 1,
   },
   menuItem: {
     flexDirection: "row",
@@ -738,6 +915,16 @@ const styles = StyleSheet.create({
     marginLeft: 15,
     fontSize: 16,
     color: "#333",
+  },
+  logoutContainer: {
+    paddingBottom: 40,
+  },
+  logoutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 15,
+    borderTopWidth: 1,
+    borderTopColor: "#E0E0E0",
   },
   menuButton: {
     marginRight: 15,

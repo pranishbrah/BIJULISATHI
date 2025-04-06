@@ -13,10 +13,9 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import axios from "axios"; // Import axios for HTTP requests
+import axios from "axios";
 import { BASE_URL } from "../config";
 
-// Sample country codes with emojis, Nepal first
 const countryCodes = [
   { code: "+977", country: "Nepal", emoji: "🇳🇵" },
   { code: "+1", country: "USA", emoji: "🇺🇸" },
@@ -24,36 +23,10 @@ const countryCodes = [
   { code: "+91", country: "India", emoji: "🇮🇳" },
 ];
 
-// Charging duration options (10 to 60 minutes in 1-minute increments)
 const durationOptions = Array.from({ length: 51 }, (_, i) => ({
   value: 10 + i,
   label: `${10 + i} minutes`,
 }));
-
-// Sample station data
-const stations = [
-  {
-    id: "1",
-    name: "ElectroHub Downtown",
-    address: "123 Main St, City Center",
-    type: "Fast Charger (50kW)",
-    price: "$0.35/kWh",
-  },
-  {
-    id: "2",
-    name: "GreenPower Station",
-    address: "456 Park Ave, North District",
-    type: "Ultra-Fast (150kW)",
-    price: "$0.45/kWh",
-  },
-  {
-    id: "3",
-    name: "EcoCharge Mall",
-    address: "789 Shopping Blvd, Eastside",
-    type: "Standard (22kW)",
-    price: "$0.25/kWh",
-  },
-];
 
 export default function BookStation() {
   const router = useRouter();
@@ -64,26 +37,54 @@ export default function BookStation() {
   const [selectedStation, setSelectedStation] = useState(null);
   const [selectedCountryCode, setSelectedCountryCode] = useState(
     countryCodes[0]
-  ); // Nepal as default
-  const [selectedDuration, setSelectedDuration] = useState(durationOptions[0]); // 10 minutes as default
+  );
+  const [selectedDuration, setSelectedDuration] = useState(durationOptions[0]);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // Find the selected station when component mounts or stationId changes
   useEffect(() => {
-    if (stationId) {
-      const station = stations.find((s) => s.id === stationId);
-      if (station) {
-        setSelectedStation(station);
-      } else {
-        Alert.alert("Error", "Station not found");
+    const fetchStationDetails = async () => {
+      if (!stationId) {
+        Alert.alert("Error", "No station ID provided");
         router.back();
+        return;
       }
-    }
+
+      try {
+        const response = await axios.get(`${BASE_URL}/admin/stations`);
+        const data = await response.data;
+        if (!data.success)
+          throw new Error(data.detail || "Failed to fetch stations");
+
+        const station = data.stations.find((s) => s._id === stationId);
+        if (station) {
+          setSelectedStation({
+            id: station._id,
+            name: station.stationName, // Corrected to stationName
+            address: station.stationAddress, // Corrected to stationAddress
+            type: station.stationType,
+            price: station.pricePerMinute, // Corrected to pricePerMinute
+          });
+        } else {
+          throw new Error("Station not found");
+        }
+      } catch (error) {
+        console.error("Error fetching station:", error);
+        Alert.alert(
+          "Error",
+          "Failed to load station details. Please try again."
+        );
+        router.back();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStationDetails();
   }, [stationId]);
 
   const handleConfirmBooking = async () => {
-    // Validate all fields
     if (!name.trim()) {
       Alert.alert("Validation Error", "Please enter your name");
       return;
@@ -101,7 +102,6 @@ export default function BookStation() {
       return;
     }
 
-    // Create booking object with country code and selected duration
     const booking = {
       stationId: selectedStation.id,
       stationName: selectedStation.name,
@@ -112,23 +112,16 @@ export default function BookStation() {
     };
 
     try {
-      // Send POST request to the FastAPI backend
-      const response = await axios.post(
-        `${BASE_URL}/confirm-booking`, // Replace with your actual backend URL
-        booking
-      );
-
-      // Extract token and bill from response if needed (optional)
+      const response = await axios.post(`${BASE_URL}/confirm-booking`, booking);
       const { tokenCode, bill } = response.data.booking;
 
-      // Show success message and navigate back
       Alert.alert(
         "Booking Confirmed",
-        `Your booking at ${selectedStation.name} for ${selectedDuration.value} minutes is confirmed!`,
+        `Your booking at ${selectedStation.name} for ${selectedDuration.value} minutes is confirmed!\nToken: ${tokenCode}\nBill: ${bill} Rs.`,
         [
           {
             text: "OK",
-            onPress: () => router.push("/bookings"),
+            onPress: () => router.push("/User_tab/myBooking"),
           },
         ]
       );
@@ -168,10 +161,21 @@ export default function BookStation() {
     </TouchableOpacity>
   );
 
-  if (!selectedStation) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <Text>Loading station details...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (!selectedStation) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <Text>Station not found</Text>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.backLink}>Go Back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -196,7 +200,6 @@ export default function BookStation() {
         </View>
 
         <View style={styles.formContainer}>
-          {/* Person Name */}
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Your Full Name</Text>
             <TextInput
@@ -208,7 +211,6 @@ export default function BookStation() {
             />
           </View>
 
-          {/* Car Number */}
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Vehicle Registration Number</Text>
             <TextInput
@@ -220,7 +222,6 @@ export default function BookStation() {
             />
           </View>
 
-          {/* Phone Number with Country Code Dropdown */}
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Mobile Number</Text>
             <View style={styles.phoneContainer}>
@@ -244,7 +245,6 @@ export default function BookStation() {
             </View>
           </View>
 
-          {/* Charging Duration Dropdown */}
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Charging Duration</Text>
             <TouchableOpacity
@@ -256,7 +256,6 @@ export default function BookStation() {
             </TouchableOpacity>
           </View>
 
-          {/* Confirm Button */}
           <TouchableOpacity
             style={styles.confirmButton}
             onPress={handleConfirmBooking}
@@ -266,7 +265,6 @@ export default function BookStation() {
         </View>
       </ScrollView>
 
-      {/* Country Code Picker Modal */}
       <Modal
         visible={showCountryPicker}
         transparent={true}
@@ -291,7 +289,6 @@ export default function BookStation() {
         </View>
       </Modal>
 
-      {/* Duration Picker Modal */}
       <Modal
         visible={showDurationPicker}
         transparent={true}
@@ -492,5 +489,10 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  backLink: {
+    color: "#4CAF50",
+    fontSize: 16,
+    marginTop: 10,
   },
 });
