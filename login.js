@@ -28,6 +28,10 @@ const LoginPage = () => {
   const [isPinVisible, setIsPinVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [newPin, setNewPin] = useState("");
 
   const router = useRouter();
 
@@ -91,7 +95,6 @@ const LoginPage = () => {
           return;
         }
 
-        // Navigate to the booking page (adjust to /User_tab/myBooking if MyBookings is the desired landing page)
         router.replace("/User_tab/booking");
       } else {
         Alert.alert("Login Failed", data.message || "Invalid credentials");
@@ -101,6 +104,81 @@ const LoginPage = () => {
         "Login Error",
         "Unable to connect to server. Please check your internet connection and try again."
       );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPin = async () => {
+    if (!phoneNumber) {
+      Alert.alert("Missing Information", "Please enter your phone number.");
+      return;
+    }
+
+    const fullPhoneNumber = `${countryCode}${phoneNumber}`;
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(`${BASE_URL}/forgot-pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ countryCode, mobile: phoneNumber }),
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        Alert.alert("Success", "OTP sent to your phone number.");
+        setOtpSent(true);
+      } else {
+        Alert.alert("Error", result.detail || "Failed to send OTP.");
+      }
+    } catch (error) {
+      console.error("Error requesting OTP:", error);
+      Alert.alert("Error", "Failed to connect to the server.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otp || !newPin) {
+      Alert.alert("Missing Information", "Please enter OTP and new PIN.");
+      return;
+    }
+
+    if (newPin.length !== 4) {
+      Alert.alert("Invalid PIN", "New PIN must be exactly 4 digits");
+      return;
+    }
+
+    const fullPhoneNumber = `${countryCode}${phoneNumber}`;
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(`${BASE_URL}/verify-otp-pin-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mobile: fullPhoneNumber,
+          otp: otp,
+          new_pin: newPin,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        Alert.alert("Success", "PIN reset successfully.");
+        setModalVisible(false);
+        setOtpSent(false);
+        setOtp("");
+        setNewPin("");
+        setPin(newPin);
+      } else {
+        Alert.alert("Error", result.detail || "Invalid OTP.");
+      }
+    } catch (error) {
+      console.error("Error verifying OTP:", error);
+      Alert.alert("Error", "Failed to connect to the server.");
     } finally {
       setIsLoading(false);
     }
@@ -203,6 +281,14 @@ const LoginPage = () => {
               </View>
             </View>
 
+            {/* Forgot PIN Link */}
+            <Pressable
+              onPress={() => setModalVisible(true)}
+              style={styles.forgotPinContainer}
+            >
+              <Text style={styles.forgotPinText}>Forgot PIN?</Text>
+            </Pressable>
+
             {/* Login Button */}
             <Pressable
               style={({ pressed }) => [
@@ -251,6 +337,150 @@ const LoginPage = () => {
                     renderItem={renderPickerItem}
                     keyExtractor={(item) => item.value}
                   />
+                </View>
+              </View>
+            </Modal>
+
+            {/* Forgot PIN Modal */}
+            <Modal
+              visible={modalVisible}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setModalVisible(false)}
+            >
+              <View style={styles.modalContainer}>
+                <View style={styles.modalContent}>
+                  <Pressable
+                    style={styles.closeIconContainer}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <MaterialIcons name="close" size={24} color="#111827" />
+                  </Pressable>
+                  <Text style={styles.modalTitle}>
+                    {otpSent ? "Verify OTP" : "Forgot PIN"}
+                  </Text>
+
+                  {!otpSent ? (
+                    <>
+                      <Text style={styles.modalLabel}>
+                        Enter your phone number to receive an OTP
+                      </Text>
+                      <View style={styles.inputContainer}>
+                        <Pressable
+                          style={styles.countryCodeContainer}
+                          onPress={() => setShowCountryPicker(true)}
+                        >
+                          <Text style={styles.countryCodeText}>
+                            {countryCodes.find((c) => c.value === countryCode)
+                              ?.label || "+977"}
+                          </Text>
+                          <MaterialIcons
+                            name="arrow-drop-down"
+                            size={24}
+                            color="#6B7280"
+                          />
+                        </Pressable>
+                        <TextInput
+                          style={[styles.input, styles.phoneInput]}
+                          placeholder="98XXXXXXXX"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="phone-pad"
+                          maxLength={10}
+                          value={phoneNumber}
+                          onChangeText={setPhoneNumber}
+                        />
+                      </View>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.loginButton,
+                          pressed && styles.buttonPressed,
+                          isLoading && styles.buttonDisabled,
+                        ]}
+                        onPress={handleForgotPin}
+                        disabled={isLoading}
+                      >
+                        <LinearGradient
+                          colors={["#3E92CC", "#0A2463"]}
+                          style={styles.gradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                        >
+                          {isLoading ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={styles.buttonText}>Send OTP</Text>
+                          )}
+                        </LinearGradient>
+                      </Pressable>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.modalLabel}>
+                        Enter the OTP sent to your phone
+                      </Text>
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons
+                          name="sms"
+                          size={20}
+                          color="#6B7280"
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter OTP"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="numeric"
+                          value={otp}
+                          onChangeText={setOtp}
+                        />
+                      </View>
+                      <Text style={styles.modalLabel}>Enter new PIN</Text>
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons
+                          name="lock-outline"
+                          size={20}
+                          color="#6B7280"
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          style={styles.input}
+                          placeholder="••••"
+                          placeholderTextColor="#9CA3AF"
+                          secureTextEntry={true}
+                          keyboardType="numeric"
+                          maxLength={4}
+                          value={newPin}
+                          onChangeText={(text) =>
+                            /^\d*$/.test(text) && setNewPin(text)
+                          }
+                        />
+                      </View>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.loginButton,
+                          pressed && styles.buttonPressed,
+                          isLoading && styles.buttonDisabled,
+                        ]}
+                        onPress={handleVerifyOtp}
+                        disabled={isLoading}
+                      >
+                        <LinearGradient
+                          colors={["#3E92CC", "#0A2463"]}
+                          style={styles.gradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                        >
+                          {isLoading ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={styles.buttonText}>
+                              Verify & Reset PIN
+                            </Text>
+                          )}
+                        </LinearGradient>
+                      </Pressable>
+                    </>
+                  )}
                 </View>
               </View>
             </Modal>
@@ -398,6 +628,7 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     marginHorizontal: 20,
     borderRadius: 10,
+    padding: 24,
     maxHeight: "50%",
   },
   pickerItem: {
@@ -408,6 +639,36 @@ const styles = StyleSheet.create({
   pickerItemText: {
     fontSize: 16,
     color: "#111827",
+  },
+  forgotPinContainer: {
+    alignItems: "flex-end",
+    marginBottom: 16,
+  },
+  forgotPinText: {
+    color: "#3E92CC",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  modalLabel: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginBottom: 8,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  closeIconContainer: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    padding: 5,
   },
 });
 
