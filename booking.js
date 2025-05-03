@@ -109,7 +109,7 @@ export default function HomeScreen() {
   useEffect(() => {
     const fetchVerifiedStations = async () => {
       try {
-        const response = await fetch(`${BASE_URL}/admin/stations`);
+        const response = await fetch(`${BASE_URL}/admin/verified-stations`);
         const data = await response.json();
         if (!data.success)
           throw new Error(data.detail || "Failed to fetch stations");
@@ -314,12 +314,11 @@ export default function HomeScreen() {
     }
   };
 
-  // Filter stations based on search query
   const filteredStations = searchQuery
     ? verifiedStations.filter(
         (s) =>
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.address.toLowerCase().includes(searchQuery.toLowerCase())
+          (s.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (s.address || "").toLowerCase().includes(searchQuery.toLowerCase())
       )
     : verifiedStations;
 
