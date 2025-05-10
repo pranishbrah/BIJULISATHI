@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import Animated, { FadeIn } from "react-native-reanimated";
 import { useSidebar } from "../SidebarContext";
 
 const BASE_URL = "http://localhost:8000";
@@ -212,58 +213,48 @@ const StationManagement = () => {
         {isSidebarOpen && (
           <>
             <Text style={styles.logo}>BijuliSathi Admin</Text>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => router.push("/Admin_tab/dashboard")}
-            >
-              <Text style={styles.menuText}>Dashboard</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => router.push("/Admin_tab/station")}
-            >
-              <Text style={styles.menuText}>Stations</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={toggleUsersDropdown}
-            >
-              <Text style={styles.menuText}>Users</Text>
-            </TouchableOpacity>
-            {isUsersDropdownOpen && (
-              <View style={styles.dropdown}>
+            {[
+              { label: "Dashboard", path: "/Admin_tab/dashboard" },
+              { label: "Stations", path: "/Admin_tab/station" },
+              { label: "Users", action: toggleUsersDropdown },
+              { label: "Station Requests", path: "/Admin_tab/stationRequest" },
+            ].map((item, index) => (
+              <View key={index}>
                 <TouchableOpacity
-                  style={styles.dropdownItem}
-                  onPress={() => {
-                    router.push({
-                      pathname: "/Admin_tab/user",
-                      params: { page: "Users" },
-                    });
-                    setIsUsersDropdownOpen(false);
-                  }}
+                  style={styles.menuItem}
+                  onPress={
+                    item.action ? item.action : () => router.push(item.path)
+                  }
                 >
-                  <Text style={styles.dropdownText}>Users</Text>
+                  <Text style={styles.menuText}>{item.label}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.dropdownItem}
-                  onPress={() => {
-                    router.push({
-                      pathname: "/Admin_tab/user",
-                      params: { page: "Owners" },
-                    });
-                    setIsUsersDropdownOpen(false);
-                  }}
-                >
-                  <Text style={styles.dropdownText}>Owners</Text>
-                </TouchableOpacity>
+                {item.label === "Users" && isUsersDropdownOpen && (
+                  <Animated.View
+                    entering={FadeIn.duration(200)}
+                    style={styles.dropdown}
+                  >
+                    {[
+                      { label: "Users", page: "Users" },
+                      { label: "Owners", page: "Owners" },
+                    ].map((subItem, subIndex) => (
+                      <TouchableOpacity
+                        key={subIndex}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          router.push({
+                            pathname: "/Admin_tab/user",
+                            params: { page: subItem.page },
+                          });
+                          setIsUsersDropdownOpen(false);
+                        }}
+                      >
+                        <Text style={styles.dropdownText}>{subItem.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </Animated.View>
+                )}
               </View>
-            )}
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => router.push("/Admin_tab/stationRequest")}
-            >
-              <Text style={styles.menuText}>Station Requests</Text>
-            </TouchableOpacity>
+            ))}
           </>
         )}
       </View>
@@ -288,6 +279,8 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRightWidth: 1,
     borderRightColor: "#2ECC71",
+    overflow: "visible",
+    flexShrink: 1,
   },
   hamburger: {
     marginBottom: 20,
@@ -300,7 +293,6 @@ const styles = StyleSheet.create({
   },
   menuItem: {
     paddingVertical: 15,
-    backgroundColor: "",
     borderRadius: 10,
     marginBottom: 10,
   },
@@ -311,15 +303,22 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   dropdown: {
-    paddingLeft: 20,
+    marginLeft: 110, // Increased indent to align under "Users" as requested
+    backgroundColor: "",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    maxWidth: 130, // Adjusted to fit within sidebar (250 - 110 - padding)
+    marginBottom: 10,
   },
   dropdownItem: {
-    paddingVertical: 10,
+    paddingVertical: 12,
+    borderRadius: 6,
   },
   dropdownText: {
     color: "#F5F6F5",
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "400",
   },
   main: {
     flex: 1,

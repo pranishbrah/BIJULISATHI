@@ -12,7 +12,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import Animated, { FadeInDown, withSpring } from "react-native-reanimated";
+import Animated, { FadeInDown, FadeIn } from "react-native-reanimated";
+import { useSidebar } from "../SidebarContext";
 
 const BASE_URL = "http://localhost:8000";
 const screenWidth = Dimensions.get("window").width;
@@ -92,7 +93,6 @@ const BarGraph = ({ data, maxValue, labelKey, valueKey, color }) => {
 
 const AdminDashboard = () => {
   const [isLoading, setIsLoading] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [dashboardStats, setDashboardStats] = useState({
     onlineStations: 0,
     totalEarnings: 0,
@@ -105,6 +105,7 @@ const AdminDashboard = () => {
   const [timeRange, setTimeRange] = useState("weekly");
   const [isUsersDropdownOpen, setIsUsersDropdownOpen] = useState(false);
   const router = useRouter();
+  const { isSidebarOpen, toggleSidebar } = useSidebar();
 
   useEffect(() => {
     let isMounted = true;
@@ -187,7 +188,7 @@ const AdminDashboard = () => {
   };
 
   const handleSidebarToggle = () => {
-    setIsSidebarOpen(!isSidebarOpen);
+    toggleSidebar();
     if (isUsersDropdownOpen) setIsUsersDropdownOpen(false);
   };
 
@@ -432,38 +433,42 @@ const AdminDashboard = () => {
               { label: "Users", action: toggleUsersDropdown },
               { label: "Station Requests", path: "/Admin_tab/stationRequest" },
             ].map((item, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.menuItem}
-                onPress={
-                  item.action ? item.action : () => router.push(item.path)
-                }
-              >
-                <Text style={styles.menuText}>{item.label}</Text>
-              </TouchableOpacity>
-            ))}
-            {isUsersDropdownOpen && (
-              <View style={styles.dropdown}>
-                {[
-                  { label: "Users", page: "Users" },
-                  { label: "Owners", page: "Owners" },
-                ].map((item, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.dropdownItem}
-                    onPress={() => {
-                      router.push({
-                        pathname: "/Admin_tab/user",
-                        params: { page: item.page },
-                      });
-                      setIsUsersDropdownOpen(false);
-                    }}
+              <View key={index}>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={
+                    item.action ? item.action : () => router.push(item.path)
+                  }
+                >
+                  <Text style={styles.menuText}>{item.label}</Text>
+                </TouchableOpacity>
+                {item.label === "Users" && isUsersDropdownOpen && (
+                  <Animated.View
+                    entering={FadeIn.duration(200)}
+                    style={styles.dropdown}
                   >
-                    <Text style={styles.dropdownText}>{item.label}</Text>
-                  </TouchableOpacity>
-                ))}
+                    {[
+                      { label: "Users", page: "Users" },
+                      { label: "Owners", page: "Owners" },
+                    ].map((subItem, subIndex) => (
+                      <TouchableOpacity
+                        key={subIndex}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          router.push({
+                            pathname: "/Admin_tab/user",
+                            params: { page: subItem.page },
+                          });
+                          setIsUsersDropdownOpen(false);
+                        }}
+                      >
+                        <Text style={styles.dropdownText}>{subItem.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </Animated.View>
+                )}
               </View>
-            )}
+            ))}
           </>
         )}
       </View>
@@ -483,6 +488,8 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRightWidth: 1,
     borderRightColor: "#2ECC71",
+    overflow: "visible",
+    flexShrink: 1,
   },
   hamburger: {
     marginBottom: 20,
@@ -506,15 +513,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   dropdown: {
-    paddingLeft: 20,
+    marginLeft: 110, // Increased indent to align under "Users"
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    maxWidth: 180, // Reduced to fit within sidebar
+    marginBottom: 10,
   },
   dropdownItem: {
     paddingVertical: 10,
+    borderRadius: 6,
   },
   dropdownText: {
     color: "#F5F6F5",
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "400",
   },
   main: {
     flex: 1,
